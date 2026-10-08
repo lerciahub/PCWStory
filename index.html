@@ -1,0 +1,1157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dead Letter Desk</title>
+<meta name="description" content="A desk of recovered letters between two rival agents, filed out of order. Drag the desk to wander, click any paper to read it.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Abril+Fatface&family=Alfa+Slab+One&family=Bungee&family=Caveat:wght@500;700&family=Courier+Prime:ital,wght@0,400;0,700;1,400&family=Pacifico&family=Permanent+Marker&family=Playfair+Display:ital,wght@1,900&family=Rock+Salt&family=Rye&family=Special+Elite&family=UnifrakturCook:wght@700&display=swap" rel="stylesheet">
+<style>
+/* ------------------------------------------------------------------
+   TOKENS (straight from design.md)
+------------------------------------------------------------------- */
+:root{
+  --linen:#F7F4EE; --plank:#EFECE6; --parchment:#F4EFE6;
+  --cream:#FFFDF5; --pink:#F9E8E8; --red:#D94B50; --denim:#4A6984; --ink:#1F1F1F;
+  --red-ink:#B5343A;                       /* darker strawberry, for small red text */
+  --type:'Courier Prime','Courier New',ui-monospace,monospace;
+  --hand:'Caveat','Segoe Script','Bradley Hand',cursive;
+  --stamp:'Special Elite','Courier New',monospace;
+  --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .25 0 0 0 0 .2 0 0 0 0 .15 0 0 0 .16 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --wood:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='500'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.008 .32' numOctaves='3' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .38 0 0 0 0 .3 0 0 0 0 .22 0 0 0 .3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
+body{background:var(--linen) var(--grain);color:var(--ink);font:400 16px/1.5 var(--type)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+svg.sprite{position:absolute;width:0;height:0}
+
+/* ------------------------------------------------------------------
+   THE DESK (pannable board)
+------------------------------------------------------------------- */
+#viewport{position:fixed;inset:0;overflow:hidden;cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none}
+body.is-dragging,body.is-dragging *{cursor:grabbing !important}
+#board{
+  position:absolute;left:0;top:0;width:3000px;height:2000px;transform-origin:0 0;
+  background-color:var(--plank);
+  background-image:var(--wood),
+    repeating-linear-gradient(0deg,rgba(31,31,31,.12) 0 2px,rgba(255,253,245,.55) 2px 4px,transparent 4px 250px),
+    repeating-linear-gradient(0deg,rgba(247,244,238,.8) 0 250px,transparent 250px 500px);
+  box-shadow:0 0 0 1px rgba(31,31,31,.08),0 30px 80px rgba(60,45,30,.18);border-radius:6px;
+}
+
+/* every clickable paper is a real <button> */
+.artifact{
+  position:absolute;left:var(--x);top:var(--y);width:var(--w);z-index:var(--z,2);
+  padding:0;border:0;background:none;font:inherit;color:inherit;text-align:left;text-transform:none;letter-spacing:normal;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transform:rotate(var(--r,0deg));transform-origin:50% 40%;
+  filter:drop-shadow(0 1px 1px rgba(31,31,31,.2)) drop-shadow(0 8px 12px rgba(60,45,30,.17));
+  transition:transform .16s ease,filter .16s ease;
+}
+/* hover is feedback only: a small paper lift and a deeper shadow */
+.artifact:hover{transform:rotate(var(--r,0deg)) translateY(-4px);
+  filter:drop-shadow(0 1px 1px rgba(31,31,31,.2)) drop-shadow(0 16px 20px rgba(60,45,30,.24))}
+.artifact:focus-visible,.artifact.located{outline:3px dashed var(--red-ink);outline-offset:8px}
+
+.paper{display:block;position:relative;background-color:var(--cream);background-image:var(--grain);color:var(--ink)}
+.ln{display:block}
+
+/* archive stamp on each exhibit */
+.tag{position:absolute;right:14px;bottom:-13px;z-index:3;display:block;white-space:nowrap;
+  font:400 12px/1 var(--stamp);letter-spacing:.08em;background:var(--cream);color:var(--ink);
+  border:1.5px solid var(--ink);border-radius:2px;padding:6px 8px 4px;transform:rotate(1.5deg)}
+.artifact.is-read .tag{background:var(--denim);color:var(--cream);border-color:var(--denim)}
+.artifact.is-read .tag::after{content:", read"}
+
+/* tape, pins, clips */
+.tape{position:absolute;z-index:2;width:96px;height:26px;background:rgba(244,239,230,.82);
+  box-shadow:0 1px 2px rgba(31,31,31,.14);border-left:2px dotted rgba(31,31,31,.12);border-right:2px dotted rgba(31,31,31,.12);
+  transform:rotate(var(--tr,-2deg))}
+.tape.pinkish{background:rgba(249,232,232,.88)}
+.pin{position:absolute;z-index:2;width:18px;height:18px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#f2a0a3 0 16%,var(--red) 42%,#9c2f35 100%);box-shadow:2px 5px 4px rgba(31,31,31,.3)}
+.clip{position:absolute;z-index:2;width:22px;height:60px;overflow:visible}
+
+/* --- ruled notebook paper --- */
+.p-note{--rule:28px;--pad-l:58px;
+  background-color:var(--cream);
+  background-image:var(--grain),
+    linear-gradient(90deg,transparent 42px,rgba(217,75,80,.45) 42px 44px,transparent 44px),
+    repeating-linear-gradient(180deg,transparent 0 calc(var(--rule) - 1px),rgba(74,105,132,.3) calc(var(--rule) - 1px) var(--rule));
+  background-position:0 0,0 0,0 calc(var(--rule) * .29);
+  padding:calc(var(--rule) * 1.5) 24px calc(var(--rule) * 3) var(--pad-l);
+  font:400 15px/var(--rule) var(--type)}
+.p-note::before{content:"";position:absolute;left:13px;top:0;bottom:0;width:16px;
+  background:
+    radial-gradient(circle,rgba(110,95,80,.55) 0 6px,rgba(31,31,31,.15) 6px 7px,transparent 7.5px) 0 12%/16px 16px no-repeat,
+    radial-gradient(circle,rgba(110,95,80,.55) 0 6px,rgba(31,31,31,.15) 6px 7px,transparent 7.5px) 0 50%/16px 16px no-repeat,
+    radial-gradient(circle,rgba(110,95,80,.55) 0 6px,rgba(31,31,31,.15) 6px 7px,transparent 7.5px) 0 88%/16px 16px no-repeat}
+.p-note .ln,.p-note p{margin:0 0 var(--rule)}
+.torn{clip-path:polygon(0 6px,4% 2px,9% 7px,15% 3px,22% 8px,30% 2px,37% 6px,45% 3px,53% 8px,61% 2px,69% 7px,77% 3px,85% 8px,92% 2px,100% 6px,100% 100%,0 100%)}
+.crumpled::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    linear-gradient(115deg,transparent 0 31%,rgba(255,255,255,.7) 31.5%,rgba(31,31,31,.05) 32.5%,transparent 34%),
+    linear-gradient(72deg,transparent 0 58%,rgba(31,31,31,.06) 58.5%,rgba(255,255,255,.6) 59.5%,transparent 61%),
+    linear-gradient(160deg,transparent 0 44%,rgba(255,255,255,.6) 44.5%,rgba(31,31,31,.05) 45.5%,transparent 48%),
+    linear-gradient(20deg,transparent 0 70%,rgba(31,31,31,.05) 70.5%,rgba(255,255,255,.5) 71.5%,transparent 74%)}
+.margin-note{position:absolute;right:16px;bottom:18px;display:block;font:700 23px/1.05 var(--hand);color:var(--red-ink);transform:rotate(-6deg)}
+.more{color:rgba(31,31,31,.6);font-style:italic}
+s{text-decoration-thickness:2px;color:rgba(31,31,31,.62)}
+.inkstamp{position:absolute;right:18px;bottom:24px;display:block;font:400 20px/1 var(--stamp);letter-spacing:.12em;
+  color:var(--red-ink);border:3px solid var(--red-ink);border-radius:3px;padding:9px 10px 5px;transform:rotate(-9deg);opacity:.88}
+
+/* --- index card --- */
+.p-card{--rule:24px;--head:46px;
+  background-color:var(--cream);
+  background-image:var(--grain),
+    linear-gradient(180deg,transparent 0 var(--head),rgba(217,75,80,.65) var(--head) calc(var(--head) + 2px),transparent calc(var(--head) + 2px)),
+    linear-gradient(var(--cream),var(--cream)),
+    repeating-linear-gradient(180deg,transparent 0 calc(var(--rule) - 1px),rgba(74,105,132,.26) calc(var(--rule) - 1px) var(--rule));
+  background-size:auto,auto,100% var(--head),auto;background-repeat:repeat,no-repeat,no-repeat,repeat;
+  background-position:0 0,0 0,0 0,0 calc(var(--head) + 1px);
+  padding:14px 20px var(--rule);font:400 14px/var(--rule) var(--type)}
+.card-h{display:block;font:400 19px/32px var(--stamp);margin:0 0 6px}
+.signed{font:700 22px/var(--rule) var(--hand)}
+
+/* --- pink crumpled receipt --- */
+.p-receipt{--t:7px;background-color:var(--pink);
+  background-image:var(--grain),
+    linear-gradient(115deg,transparent 0 31%,rgba(255,255,255,.65) 31.5%,rgba(31,31,31,.04) 32.5%,transparent 34%),
+    linear-gradient(72deg,transparent 0 58%,rgba(31,31,31,.05) 58.5%,rgba(255,255,255,.5) 59.5%,transparent 61%),
+    linear-gradient(160deg,transparent 0 44%,rgba(255,255,255,.55) 44.5%,rgba(31,31,31,.04) 45.5%,transparent 48%),
+    linear-gradient(20deg,transparent 0 70%,rgba(31,31,31,.045) 70.5%,rgba(255,255,255,.45) 71.5%,transparent 74%);
+  padding:28px 18px 32px;font:400 13px/1.45 var(--type);
+  -webkit-mask:conic-gradient(from 135deg at top,#0000,#000 1deg 89deg,#0000 90deg) top/calc(var(--t) * 2) 51% repeat-x,
+               conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) bottom/calc(var(--t) * 2) 51% repeat-x;
+          mask:conic-gradient(from 135deg at top,#0000,#000 1deg 89deg,#0000 90deg) top/calc(var(--t) * 2) 51% repeat-x,
+               conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) bottom/calc(var(--t) * 2) 51% repeat-x}
+.rc-head{display:block;text-align:center;font:400 17px/1.2 var(--stamp);margin:0 0 4px}
+.rc-sub{display:block;text-align:center;margin:0}
+.rc-rule{display:block;border:0;border-top:1.5px dashed rgba(31,31,31,.55);margin:10px 0}
+.rc-row{display:flex;justify-content:space-between;gap:12px;margin:0 0 4px}
+.rc-row > :last-child{flex:none}
+.rc-back{display:block;font:700 24px/1.15 var(--hand);color:var(--red-ink);margin:14px 0 0;transform:rotate(-1.5deg)}
+
+/* --- napkin --- */
+.p-napkin{aspect-ratio:1;background-color:var(--cream);
+  background-image:var(--grain),linear-gradient(135deg,rgba(31,31,31,.045) 0 49.7%,transparent 50%);
+  padding:46px 40px;font:500 24px/1.15 var(--hand);color:var(--denim)}
+.p-napkin::before{content:"";position:absolute;inset:14px;border:2px dotted rgba(74,105,132,.32);pointer-events:none}
+.p-napkin::after{content:"";position:absolute;inset:21px;border:1px dotted rgba(74,105,132,.25);pointer-events:none}
+.p-napkin .ln,.p-napkin p{margin:0 0 .45em}
+.stain{position:absolute;right:26px;bottom:30px;width:96px;aspect-ratio:1;border-radius:50%;
+  border:6px solid rgba(120,85,50,.14);border-left-color:rgba(120,85,50,.06);box-shadow:inset 0 0 0 2px rgba(120,85,50,.07)}
+
+/* --- telegram --- */
+.p-telegram{background-color:var(--parchment);background-image:var(--grain);padding:18px 22px 24px;border:1px solid rgba(31,31,31,.14)}
+.tg-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-bottom:3px double var(--ink);
+  padding-bottom:8px;margin:0 0 14px;font:400 12px/1.2 var(--stamp);letter-spacing:.06em}
+.tg-head b{font:400 26px/1 var(--stamp);letter-spacing:.18em}
+.strip{display:table;background:var(--cream);font:700 14px/1.25 var(--type);letter-spacing:.05em;text-transform:uppercase;
+  padding:5px 9px 4px;margin:0 0 7px;box-shadow:0 1px 2px rgba(31,31,31,.2)}
+.strip:nth-of-type(even){margin-left:16px}
+.strip:nth-of-type(3n){margin-left:6px}
+.archivist{display:block;font:italic 400 13px/1.5 var(--type);color:rgba(31,31,31,.72);margin:16px 0 0}
+
+/* --- magazine clipping: the one place deep newsprint ink is allowed on the desk --- */
+.p-mag{background-color:var(--ink);color:var(--cream);
+  background-image:radial-gradient(rgba(255,253,245,.08) 1px,transparent 1.4px);background-size:6px 6px;
+  padding:32px 30px 36px;
+  clip-path:polygon(1% 3%,34% 0,71% 2%,99% 0,100% 46%,98% 97%,62% 100%,27% 98%,0 100%,2% 51%)}
+.cuts{display:flex;flex-wrap:wrap;gap:9px 8px;align-items:center;margin:0}
+.cut{display:inline-block;padding:5px 10px 3px;font-size:29px;line-height:1.1;box-shadow:1px 2px 0 rgba(0,0,0,.45);
+  transform:rotate(var(--r,0deg)) translateY(var(--dy,0))}
+.mag-cap{display:block;margin:18px 0 0;font:400 13px/1.55 var(--type);color:var(--cream)}
+
+/* --- cassette --- */
+.cassette{display:block;position:relative;width:100%;aspect-ratio:300/190;background:var(--denim);border-radius:10px;
+  box-shadow:inset 0 0 0 2px rgba(255,253,245,.16),inset 0 -8px 0 rgba(31,31,31,.16);font:700 22px/1 var(--hand)}
+.cassette::before,.cassette::after{content:"";position:absolute;top:6px;width:8px;height:8px;border-radius:50%;
+  background:radial-gradient(circle,var(--ink) 0 1.5px,#c9c4ba 2px)}
+.cassette::before{left:6px}.cassette::after{right:6px}
+.cs-label{position:absolute;inset:8% 7% 30% 7%;display:block;background:var(--cream) var(--grain);border-radius:5px;
+  border-bottom:10px solid var(--red);padding:.3em .6em;color:var(--red-ink);text-align:center;white-space:nowrap;overflow:hidden}
+.cs-win{position:absolute;left:24%;right:24%;top:40%;height:25%;display:flex;justify-content:space-between;align-items:center;
+  padding:0 5%;background:var(--ink);border-radius:999px}
+.cs-reel{display:block;height:74%;aspect-ratio:1;border-radius:50%;border:3px solid var(--cream);
+  background:conic-gradient(var(--cream) 0 8%,var(--ink) 8% 33%,var(--cream) 33% 41%,var(--ink) 41% 66%,var(--cream) 66% 74%,var(--ink) 74%)}
+.cs-foot{position:absolute;left:20%;right:20%;bottom:0;height:20%;display:block;background:rgba(31,31,31,.22);
+  clip-path:polygon(7% 0,93% 0,100% 100%,0 100%)}
+.is-playing .cs-reel{animation:spin 2.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* --- polaroid --- */
+.p-polaroid{background-color:var(--cream);background-image:var(--grain);padding:14px 14px 18px}
+.p-polaroid svg{display:block;width:100%;height:auto}
+.pol-cap{display:block;font:700 25px/1 var(--hand);text-align:center;margin:12px 0 0}
+
+/* --- cinema ticket --- */
+.p-ticket{background-color:var(--cream);
+  background-image:var(--grain),linear-gradient(180deg,var(--red) 0 10px,transparent 10px calc(100% - 10px),var(--red) calc(100% - 10px));
+  display:grid;grid-template-columns:1fr auto;
+  -webkit-mask:radial-gradient(circle 12px at 0 50%,#0000 96%,#000) left/51% 100% no-repeat,radial-gradient(circle 12px at 100% 50%,#0000 96%,#000) right/51% 100% no-repeat;
+          mask:radial-gradient(circle 12px at 0 50%,#0000 96%,#000) left/51% 100% no-repeat,radial-gradient(circle 12px at 100% 50%,#0000 96%,#000) right/51% 100% no-repeat}
+.tk-main{display:block;padding:26px 14px 22px 30px;border-right:2px dashed rgba(31,31,31,.45)}
+.tk-big{display:block;font:400 30px/1 'Alfa Slab One',Georgia,serif;color:var(--red)}
+.tk-small{display:block;font:400 13px/1.4 var(--stamp);letter-spacing:.06em;margin-top:8px}
+.tk-stub{display:grid;place-items:center;writing-mode:vertical-rl;padding:18px 26px 18px 12px;font:400 14px/1.2 var(--stamp);letter-spacing:.14em}
+
+/* --- seed packet --- */
+.p-seed{background-color:var(--cream);background-image:var(--grain);text-align:center;border-radius:2px;padding:0 0 16px;overflow:hidden}
+.sd-band{display:block;background:var(--red);color:var(--cream);font:400 22px/1 'Alfa Slab One',Georgia,serif;padding:15px 4px 13px}
+.p-seed svg{display:block;width:118px;height:auto;margin:16px auto 8px}
+.sd-var{display:block;font:400 14px/1.3 var(--stamp);letter-spacing:.14em}
+.sd-for{display:block;font:700 24px/1.1 var(--hand);color:var(--red-ink);margin-top:8px;transform:rotate(-3deg)}
+
+/* --- postcard --- */
+.p-postcard{background-color:var(--cream);background-image:var(--grain);display:grid;grid-template-columns:1.15fr 1fr;padding:20px;min-height:270px;border-radius:3px}
+.pc-msg{display:block;padding-right:18px;border-right:1.5px solid rgba(31,31,31,.35);font:500 22px/1.2 var(--hand);color:var(--denim)}
+.pc-title{display:block;font:400 12px/1.3 var(--stamp);color:var(--ink);letter-spacing:.04em;margin:0 0 10px}
+.pc-addr{display:block;position:relative;padding:104px 0 0 18px;font:400 14px/2 var(--type)}
+.pc-addr .al{display:block;border-bottom:1px solid rgba(31,31,31,.4)}
+.stamp{--perf:var(--cream);position:absolute;right:0;top:0;width:66px;height:80px;display:grid;place-items:center;text-align:center;
+  background:var(--red);border:5px dotted var(--perf);color:var(--cream);font:400 30px/1 'Abril Fatface',Georgia,serif}
+.postmark{position:absolute;right:46px;top:34px;width:72px;height:72px;display:grid;place-items:center;text-align:center;
+  border:2px solid rgba(31,31,31,.6);border-radius:50%;font:400 10px/1.2 var(--stamp);color:rgba(31,31,31,.75);transform:rotate(-14deg)}
+
+/* --- masthead: cutout ransom-note title --- */
+.title{position:absolute;left:var(--x);top:var(--y);width:var(--w);text-align:center;z-index:1}
+.title h1{margin:0;display:flex;flex-direction:column;align-items:center;gap:8px;font-size:62px;font-weight:400}
+.rrow{display:flex;gap:6px;justify-content:center}
+.rl{display:inline-grid;place-items:center;min-width:60px;height:88px;padding:0 11px;font-size:62px;line-height:1;white-space:nowrap;
+  box-shadow:1px 2px 0 rgba(31,31,31,.14),3px 7px 10px rgba(60,45,30,.22);transform:rotate(var(--r,0deg)) translateY(var(--dy,0))}
+.sub{display:inline-block;margin:26px 0 0;padding:11px 18px 9px;max-width:440px;background:var(--cream) var(--grain);
+  font:400 15px/1.45 var(--type);box-shadow:0 1px 1px rgba(31,31,31,.2),0 6px 10px rgba(60,45,30,.16);transform:rotate(var(--r,-1deg))}
+.sub .s{color:var(--red-ink)} .sub .t{color:var(--denim)}
+
+/* --- loose objects (decoration only, not clickable) --- */
+.deco{position:absolute;left:var(--x);top:var(--y);pointer-events:none}
+.btn4{--hole:rgba(60,45,30,.75);width:var(--d,46px);aspect-ratio:1;border-radius:50%;
+  background:
+    radial-gradient(circle at 39% 39%,var(--hole) 0 2.6px,transparent 3.3px),
+    radial-gradient(circle at 61% 39%,var(--hole) 0 2.6px,transparent 3.3px),
+    radial-gradient(circle at 39% 61%,var(--hole) 0 2.6px,transparent 3.3px),
+    radial-gradient(circle at 61% 61%,var(--hole) 0 2.6px,transparent 3.3px),
+    radial-gradient(circle,transparent 0 52%,rgba(31,31,31,.16) 53% 58%,transparent 59%),
+    radial-gradient(circle at 32% 28%,rgba(255,255,255,.5),transparent 55%),
+    var(--c,var(--red));
+  box-shadow:1px 2px 0 rgba(31,31,31,.2),3px 6px 8px rgba(60,45,30,.3)}
+.ring{width:160px;aspect-ratio:1;border-radius:50%;border:7px solid rgba(120,85,50,.13);border-right-color:rgba(120,85,50,.05);
+  box-shadow:inset 0 0 0 2px rgba(120,85,50,.08),0 0 0 1px rgba(120,85,50,.05);transform:rotate(20deg)}
+.pencil{width:330px;height:13px;transform:rotate(var(--rot,-24deg));border-radius:3px 0 0 3px;
+  background:linear-gradient(90deg,var(--pink) 0 6%,#c9c4ba 6% 10%,var(--red) 10%);filter:drop-shadow(2px 5px 4px rgba(60,45,30,.3))}
+.pencil::before{content:"";position:absolute;left:10%;right:0;top:3px;height:2px;background:rgba(255,255,255,.32)}
+.pencil::after{content:"";position:absolute;left:100%;top:0;width:26px;height:100%;
+  background:linear-gradient(90deg,#e6d3b3 0 68%,var(--ink) 68%);clip-path:polygon(0 0,100% 50%,0 100%)}
+.stamp.loose{--perf:var(--plank);position:absolute;left:var(--x);top:var(--y);right:auto;transform:rotate(var(--rot,8deg));
+  box-shadow:2px 4px 6px rgba(60,45,30,.2)}
+.stamp.loose.blue{background:var(--denim)}
+
+/* ------------------------------------------------------------------
+   FIXED CONTROLS (label-maker tape)
+------------------------------------------------------------------- */
+.hud{position:fixed;left:0;right:0;bottom:0;z-index:7;display:flex;justify-content:space-between;align-items:flex-end;gap:10px;
+  padding:12px;pointer-events:none}
+.hud > *{pointer-events:auto}
+.hud-group{display:flex;gap:8px}
+.lm{min-height:44px;min-width:44px;font:400 14px/1 var(--stamp);letter-spacing:.1em;background:var(--denim);color:var(--cream);
+  border:0;border-radius:3px;padding:14px 14px 11px;cursor:pointer;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 2px 0 rgba(31,31,31,.25),0 6px 14px rgba(60,45,30,.25)}
+.lm.red{background:var(--red-ink)}
+.lm:hover{filter:brightness(1.08)}
+.lm:focus-visible{outline:3px dashed var(--red-ink);outline-offset:3px}
+.lm.red:focus-visible{outline-color:var(--denim)}
+.hint{align-self:center;margin:0;padding:8px 14px 6px;background:var(--cream) var(--grain);font:400 13px/1.35 var(--type);
+  box-shadow:0 1px 1px rgba(31,31,31,.2),0 4px 8px rgba(60,45,30,.16);transform:rotate(-.7deg)}
+@media (max-width:640px){.hint{display:none}}
+
+/* ------------------------------------------------------------------
+   INDEX: the retro magazine drawer (deep newsprint ink lives here)
+------------------------------------------------------------------- */
+#drawer{position:fixed;left:0;top:0;bottom:0;z-index:6;width:min(350px,88vw);overflow:auto;
+  background-color:var(--ink);color:var(--cream);
+  background-image:radial-gradient(rgba(255,253,245,.06) 1px,transparent 1.4px);background-size:6px 6px;
+  padding:26px 20px 96px;box-shadow:8px 0 30px rgba(31,31,31,.28);
+  transform:translateX(-104%);visibility:hidden;transition:transform .22s ease,visibility 0s .22s}
+#drawer.open{transform:none;visibility:visible;transition:transform .22s ease,visibility 0s}
+.dr-mast{margin:0;font:400 54px/1 'Abril Fatface',Georgia,serif}
+.dr-issue{margin:6px 0 16px;padding:8px 0 6px;border-top:3px double var(--cream);border-bottom:1px solid var(--cream);
+  font:400 13px/1.4 var(--stamp)}
+#drawer ol{list-style:none;margin:0;padding:0}
+#drawer li button{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:baseline;width:100%;min-height:48px;
+  padding:10px 4px 8px;background:none;border:0;border-bottom:1px dashed rgba(255,253,245,.3);color:var(--cream);
+  font:400 15px/1.3 var(--type);text-align:left;cursor:pointer}
+#drawer li button:hover{background:rgba(255,253,245,.08)}
+#drawer li button:focus-visible,.dr-close:focus-visible{outline:2px dashed var(--cream);outline-offset:2px}
+.dn{grid-row:span 2;align-self:center;background:var(--cream);color:var(--ink);font:400 18px/1 'Abril Fatface',Georgia,serif;padding:6px 7px 4px;transform:rotate(-3deg)}
+.dk{font:400 12px/1.2 var(--stamp);color:rgba(255,253,245,.75)}
+.dr-close{position:absolute;right:14px;top:16px;min-width:44px;min-height:44px;background:none;border:1.5px solid var(--cream);
+  color:var(--cream);font:400 13px/1 var(--stamp);padding:10px 10px 8px;cursor:pointer}
+
+/* ------------------------------------------------------------------
+   READER (pop-up artifact)
+------------------------------------------------------------------- */
+dialog#reader{border:0;padding:0;background:transparent;color:var(--ink);overflow:visible;
+  width:min(680px,94vw);max-width:none;max-height:92vh;max-height:92dvh}
+dialog#reader[open]{display:flex;flex-direction:column;animation:lift .18s ease-out}
+dialog#reader::backdrop{background:rgba(247,244,238,.82);-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+@keyframes lift{from{opacity:0;transform:translateY(10px) rotate(-.6deg)}}
+.rd-bar{display:flex;align-items:center;gap:10px;margin:0 4px 8px}
+.rd-bar h2{flex:1;margin:0;font:400 19px/1.2 var(--stamp)}
+.rd-ex{display:block;font:400 12px/1.2 var(--stamp);letter-spacing:.06em;color:rgba(31,31,31,.75)}
+.sheet{flex:1 1 auto;min-height:0;overflow:auto;padding:10px 12px 26px;overscroll-behavior:contain}
+.sheet:focus-visible{outline:3px dashed var(--red-ink);outline-offset:-2px}
+.paper-shadow{filter:drop-shadow(0 1px 1px rgba(31,31,31,.2)) drop-shadow(0 12px 18px rgba(60,45,30,.22))}
+.rd-nav{display:flex;justify-content:space-between;gap:10px;margin:8px 4px 0}
+
+/* reader-size papers */
+.big{font-size:17px;line-height:1.6}
+.big p{margin:0 0 1em}
+.p-note.big{--rule:32px;--pad-l:64px;font:400 17px/var(--rule) var(--type);padding-right:30px}
+.p-note.big p{margin:0 0 var(--rule)}
+.big .margin-note{position:static;width:max-content;max-width:100%;margin:0 0 0 auto;font-size:31px;transform:rotate(-4deg)}
+.p-card.big{--rule:28px;--head:52px;font:400 16px/var(--rule) var(--type);padding:16px 26px calc(var(--rule) * 1.5)}
+.p-card.big .card-h{font:400 23px/36px var(--stamp);margin:0 0 8px}
+.p-card.big p,.p-card.big ol{margin:0 0 var(--rule)}
+.p-card.big ol{padding-left:30px}
+.p-card.big .signed{font-size:28px}
+.p-receipt.big{--t:9px;max-width:400px;margin:0 auto;font:400 15px/1.5 var(--type);padding:36px 26px 40px}
+.p-receipt.big .rc-head{font-size:21px}
+.p-receipt.big .rc-back{font-size:29px}
+.p-napkin.big{aspect-ratio:auto;max-width:520px;margin:0 auto;padding:60px 54px 70px;font:500 30px/1.2 var(--hand)}
+.p-telegram.big{padding:26px 30px 30px}
+.p-telegram.big .strip{font-size:16px;padding:7px 12px 5px;margin-bottom:9px}
+.p-telegram.big .tg-head b{font-size:32px}
+.p-mag.big{padding:46px 40px 52px}
+.p-mag.big .cut{font-size:38px;padding:7px 14px 4px}
+.p-mag.big .mag-cap{font-size:16px;margin-top:26px}
+.p-plain.big{padding:26px 30px 30px}
+.p-plain h3{margin:22px 0 8px;font:400 17px/1.2 var(--stamp)}
+.aside{color:rgba(31,31,31,.7);font-style:italic}
+.hand-red{font:700 27px/1.15 var(--hand);color:var(--red-ink)}
+.hand-blue{font:700 27px/1.15 var(--hand);color:var(--denim)}
+.deck{display:grid;gap:14px;justify-items:center;padding:18px;background:var(--parchment);border:1px solid rgba(31,31,31,.14)}
+.deck .cassette{max-width:360px;font-size:27px}
+.deck-controls{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px 14px}
+.deck-status{font:400 14px/1.3 var(--type)}
+.p-polaroid.big{max-width:480px;margin:0 auto;padding:20px 20px 24px}
+.p-polaroid.big .pol-cap{font-size:32px;margin:16px 0 18px}
+.p-polaroid.big p{font-size:16px}
+.p-seed.big{max-width:420px;margin:0 auto;text-align:left;padding-bottom:26px}
+.p-seed.big .sd-band{font-size:30px;text-align:center;padding:20px 8px 17px}
+.p-seed.big .sd-body{padding:20px 26px 0}
+.p-seed.big .sd-print{font:400 14px/1.6 var(--stamp);border-top:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);padding:10px 0 7px}
+.p-postcard.big{min-height:320px;padding:26px}
+.p-postcard.big .pc-msg{font-size:28px}
+.p-postcard.big .pc-addr{font-size:15px}
+@media (max-width:520px){
+  .p-postcard.big{grid-template-columns:1fr}
+  .p-postcard.big .pc-msg{border-right:0;border-bottom:1.5px solid rgba(31,31,31,.35);padding:0 0 16px}
+  .p-postcard.big .pc-addr{padding-left:0}
+  .p-note.big{--pad-l:54px;font-size:15.5px;padding-right:18px}
+  .p-napkin.big{padding:44px 36px 54px;font-size:26px}
+  .p-mag.big .cut{font-size:30px}
+}
+/* film frame for a video link (a dark cutout block, isolated in the reader) */
+.reel{margin:20px 0 0;padding:30px 18px;background-color:var(--ink);color:var(--cream);text-align:center;font:400 14px/1.55 var(--type);
+  background-image:repeating-linear-gradient(90deg,var(--cream) 0 10px,transparent 10px 24px),repeating-linear-gradient(90deg,var(--cream) 0 10px,transparent 10px 24px);
+  background-size:100% 8px;background-repeat:no-repeat;background-position:7px 8px,7px calc(100% - 8px)}
+.reel strong{display:block;font:400 18px/1.3 var(--stamp);margin-bottom:6px}
+.reel a{color:var(--cream);font:400 18px/1.3 var(--stamp)}
+.reel code{font:inherit;background:rgba(255,253,245,.14);padding:1px 5px}
+
+noscript p{position:fixed;inset:auto 12px 76px 12px;z-index:9;margin:0;padding:12px 16px;background:var(--cream);border:2px solid var(--ink);font:400 15px/1.4 var(--type)}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+}
+</style>
+</head>
+<body>
+
+<!-- shared drawings -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="lighthouse" viewBox="0 0 240 200">
+    <rect width="240" height="200" fill="#A9BACA"/>
+    <circle cx="188" cy="42" r="15" fill="#FFFDF5" opacity=".85"/>
+    <polygon points="118,54 0,14 0,78" fill="#FFFDF5" opacity=".45"/>
+    <rect y="150" width="240" height="50" fill="#4A6984"/>
+    <path d="M0 160 q15 -6 30 0 t30 0 t30 0 t30 0 t30 0 t30 0 t30 0 t30 0" fill="none" stroke="#FFFDF5" stroke-width="1.5" opacity=".6"/>
+    <path d="M66 170 L94 138 L150 132 L184 150 L206 172 Z" fill="#1F1F1F"/>
+    <polygon points="108,140 132,140 127,66 113,66" fill="#FFFDF5"/>
+    <polygon points="109.4,120 130.6,120 129.6,104 110.4,104" fill="#D94B50"/>
+    <polygon points="111.6,86 128.4,86 127.5,74 112.5,74" fill="#D94B50"/>
+    <rect x="109" y="60" width="22" height="6" fill="#1F1F1F"/>
+    <rect x="113" y="48" width="14" height="12" fill="#FFFDF5" stroke="#1F1F1F" stroke-width="1.5"/>
+    <polygon points="110,48 130,48 120,37" fill="#1F1F1F"/>
+    <circle cx="120" cy="54" r="3" fill="#D94B50"/>
+    <path d="M0 200 L0 178 Q90 164 240 184 L240 200 Z" fill="#F4EFE6"/>
+    <path d="M148 200 L157 179 L162 179 L160 200 Z" fill="#1F1F1F" opacity=".45"/>
+    <path d="M170 200 L175 181 L180 181 L182 200 Z" fill="#1F1F1F" opacity=".45"/>
+  </symbol>
+  <symbol id="strawberry" viewBox="0 0 100 112">
+    <path d="M50 108 C22 88 8 60 15 41 C21 24 40 26 50 33 C60 26 79 24 85 41 C92 60 78 88 50 108 Z" fill="#D94B50"/>
+    <path d="M50 34 L30 22 L44 24 L50 6 L56 24 L70 22 Z" fill="#4A6984"/>
+    <g fill="#FFFDF5">
+      <ellipse cx="34" cy="50" rx="2" ry="3.2"/><ellipse cx="50" cy="48" rx="2" ry="3.2"/><ellipse cx="66" cy="50" rx="2" ry="3.2"/>
+      <ellipse cx="27" cy="66" rx="2" ry="3.2"/><ellipse cx="42" cy="65" rx="2" ry="3.2"/><ellipse cx="58" cy="65" rx="2" ry="3.2"/><ellipse cx="73" cy="66" rx="2" ry="3.2"/>
+      <ellipse cx="36" cy="81" rx="2" ry="3.2"/><ellipse cx="50" cy="82" rx="2" ry="3.2"/><ellipse cx="64" cy="81" rx="2" ry="3.2"/>
+      <ellipse cx="50" cy="96" rx="2" ry="3.2"/>
+    </g>
+  </symbol>
+</svg>
+
+<!-- ==================================================================
+     THE DESK
+     To move a paper: change --x / --y (pixels on a 3000 x 2000 board).
+     To add one: copy a <button class="artifact"> and give it a matching
+     <template id="tpl-YOUR-ID"> further down. Tilt is assigned in script.
+=================================================================== -->
+<main id="viewport" aria-label="The desk. Drag to move around it. Every paper is a button that opens its full text.">
+  <div id="board">
+
+    <!-- loose objects, decoration only -->
+    <span class="deco ring" style="--x:250px;--y:240px" aria-hidden="true"></span>
+    <span class="deco pencil" style="--x:520px;--y:300px;--rot:-22deg" aria-hidden="true"></span>
+    <span class="deco btn4" style="--x:1140px;--y:560px;--c:var(--red)" aria-hidden="true"></span>
+    <span class="deco btn4" style="--x:1196px;--y:600px;--c:var(--denim);--d:34px" aria-hidden="true"></span>
+    <span class="deco btn4" style="--x:2010px;--y:1620px;--c:var(--pink);--d:54px" aria-hidden="true"></span>
+    <span class="deco btn4" style="--x:2090px;--y:1690px;--c:var(--cream);--d:38px" aria-hidden="true"></span>
+    <span class="deco btn4" style="--x:640px;--y:1300px;--c:var(--denim);--d:42px" aria-hidden="true"></span>
+    <span class="deco btn4" style="--x:2440px;--y:300px;--c:var(--red);--d:36px" aria-hidden="true"></span>
+    <span class="stamp loose" style="--x:1010px;--y:1720px;--rot:9deg" aria-hidden="true">11</span>
+    <span class="stamp loose blue" style="--x:1096px;--y:1750px;--rot:-6deg" aria-hidden="true">7</span>
+    <span class="stamp loose blue" style="--x:2660px;--y:1150px;--rot:12deg" aria-hidden="true">3</span>
+    <span class="deco ring" style="--x:2300px;--y:1700px" aria-hidden="true"></span>
+
+    <!-- masthead -->
+    <header class="title" style="--x:1230px;--y:680px;--w:540px">
+      <h1 data-ransom>Dead Letter Desk</h1>
+      <p class="sub" data-tilt>Recovered correspondence between <b class="s">S.</b> and <b class="t">T.</b>, filed out of order.</p>
+    </header>
+
+    <!-- 01 read me -->
+    <button class="artifact" type="button" data-tilt data-id="read-me" data-kind="index card" data-title="Read this first. Or last." style="--x:1700px;--y:1060px;--w:320px;--z:4">
+      <span class="pin" style="left:150px;top:-7px"></span>
+      <span class="paper p-card">
+        <span class="card-h">Read this first. Or last.</span>
+        <span class="ln">Nothing on this desk is in order.</span>
+        <span class="ln">Drag to slide the desk around.</span>
+        <span class="ln">Click any paper to pick it up.</span>
+        <span class="ln signed">The Archivist</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 02 cassette -->
+    <button class="artifact" type="button" data-tilt data-id="side-a" data-kind="cassette tape" data-title="Side A, for T." style="--x:1330px;--y:390px;--w:300px">
+      <span class="cassette">
+        <span class="cs-label">for T. play when it rains</span>
+        <span class="cs-win"><span class="cs-reel"></span><span class="cs-reel"></span></span>
+        <span class="cs-foot"></span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 03 the lighthouse letter -->
+    <button class="artifact" type="button" data-tilt data-id="third-stair" data-kind="letter" data-title="Under the third stair" style="--x:690px;--y:540px;--w:350px">
+      <span class="tape" style="left:130px;top:-9px"></span>
+      <span class="paper p-note torn">
+        <span class="ln">S.,</span>
+        <span class="ln">I found your note where you meant me to find it: under the third stair of the lighthouse I had been sent to un-build.</span>
+        <span class="ln">Clever. I un-built it anyway.</span>
+        <span class="ln more">(continues)</span>
+        <span class="margin-note">Liar. You kept<br>the lamp.</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 05 napkin (sits under the receipt) -->
+    <button class="artifact" type="button" data-tilt data-id="napkin" data-kind="napkin" data-title="Left under the sugar" style="--x:880px;--y:1130px;--w:296px;--z:2">
+      <span class="paper p-napkin">
+        <span class="ln">S.</span>
+        <span class="ln">The pie was already eaten when I arrived.</span>
+        <span class="ln">Only you would think that is funny.</span>
+        <span class="ln">T.</span>
+        <span class="stain"></span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 04 receipt -->
+    <button class="artifact" type="button" data-tilt data-id="diner" data-kind="receipt" data-title="The Last Honest Diner" style="--x:1150px;--y:1170px;--w:240px;--z:3">
+      <span class="paper p-receipt">
+        <span class="rc-head">The Last Honest Diner</span>
+        <span class="rc-sub">Table 4, a Tuesday that did not happen</span>
+        <span class="rc-rule"></span>
+        <span class="rc-row"><span>1 coffee, cold by now</span><span>0.00</span></span>
+        <span class="rc-row"><span>1 pie, strawberry (yours)</span><span>0.00</span></span>
+        <span class="rc-row"><span>2 hrs in the booth you would check last</span><span>0.00</span></span>
+        <span class="rc-row"><span>1 lighthouse, restored</span><span>0.00</span></span>
+        <span class="rc-rule"></span>
+        <span class="rc-row"><span>Total</span><span>see reverse</span></span>
+        <span class="rc-back">You're welcome. S.</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 06 telegram -->
+    <button class="artifact" type="button" data-tilt data-id="telegram" data-kind="telegram" data-title="They have noticed" style="--x:1960px;--y:500px;--w:440px">
+      <svg class="clip" style="left:26px;top:-22px" viewBox="0 0 24 64" aria-hidden="true"><path d="M6 16 V46 a6 6 0 0 0 12 0 V12 a9 9 0 0 0 -18 0 V48" transform="translate(3 4)" fill="none" stroke="#7d8a96" stroke-width="2.4" stroke-linecap="round"/></svg>
+      <span class="paper p-telegram">
+        <span class="tg-head"><b>Telegram</b><span>to S., care of wherever</span></span>
+        <span class="strip">They have noticed the lighthouse stop</span>
+        <span class="strip">I told them it was drift stop</span>
+        <span class="strip">They believed me stop</span>
+        <span class="strip">I have never lied to them before stop</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 07 magazine clipping -->
+    <button class="artifact" type="button" data-tilt data-id="clipping" data-kind="magazine clipping" data-title="Where nothing has been corrected" style="--x:2090px;--y:1000px;--w:410px">
+      <span class="paper p-mag">
+        <span class="cuts">
+          <span class="cut">meet</span><span class="cut">me</span><span class="cut">where</span><span class="cut">nothing</span><span class="cut">has</span><span class="cut">been</span><span class="cut">corrected</span>
+        </span>
+        <span class="mag-cap">Seven words, seven magazines, one pair of scissors.</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 08 polaroid -->
+    <button class="artifact" type="button" data-tilt data-id="polaroid" data-kind="photograph" data-title="The lamp, still on" style="--x:330px;--y:1000px;--w:264px">
+      <span class="tape pinkish" style="left:84px;top:-12px;--tr:3deg"></span>
+      <span class="paper p-polaroid">
+        <svg viewBox="0 0 240 200" role="img" aria-label="A striped lighthouse on dark rocks, its lamp lit. Two long shadows fall across the sand in the foreground."><use href="#lighthouse"/></svg>
+        <span class="pol-cap">the lamp, still on</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 09 ticket -->
+    <button class="artifact" type="button" data-tilt data-id="late-show" data-kind="cinema ticket" data-title="Admit one, late show" style="--x:1560px;--y:1490px;--w:310px">
+      <span class="paper p-ticket">
+        <span class="tk-main">
+          <span class="tk-big">Admit one</span>
+          <span class="tk-small">The Roxy, late show. Row K, seat 11.</span>
+        </span>
+        <span class="tk-stub">No. 0011</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 10 seed packet -->
+    <button class="artifact" type="button" data-tilt data-id="everbearing" data-kind="seed packet" data-title="Everbearing" style="--x:470px;--y:1460px;--w:224px">
+      <span class="paper p-seed">
+        <span class="sd-band">Strawberries</span>
+        <svg viewBox="0 0 100 112" aria-hidden="true"><use href="#strawberry"/></svg>
+        <span class="sd-var">Everbearing</span>
+        <span class="sd-for">one season, for T.</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 11 postcard -->
+    <button class="artifact" type="button" data-tilt data-id="postcard" data-kind="postcard" data-title="Greetings from the coast (before)" style="--x:2300px;--y:1420px;--w:430px">
+      <span class="paper p-postcard">
+        <span class="pc-msg">
+          <span class="pc-title">Greetings from the coast (before)</span>
+          <span class="ln">S. Weather holding. Lamp lit.</span>
+          <span class="ln">It rained on the Thursday, so I played it.</span>
+          <span class="ln">I counted eleven. T.</span>
+        </span>
+        <span class="pc-addr">
+          <span class="stamp">11</span><span class="postmark">the coast<br>before</span>
+          <span class="al">S.</span><span class="al">c/o the third stair</span><span class="al">the lighthouse</span>
+        </span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+    <!-- 12 the unsent draft -->
+    <button class="artifact" type="button" data-tilt data-id="never-sent" data-kind="draft" data-title="Never sent" style="--x:2520px;--y:600px;--w:330px">
+      <span class="paper p-note crumpled">
+        <span class="ln">S.,</span>
+        <span class="ln"><s>I cannot.</s></span>
+        <span class="ln"><s>They will notice.</s></span>
+        <span class="ln">I planted them.</span>
+        <span class="ln more">(continues)</span>
+        <span class="inkstamp">Never sent</span>
+      </span>
+      <span class="tag">Exhibit <span data-n></span></span>
+    </button>
+
+  </div>
+</main>
+
+<!-- fixed controls -->
+<div class="hud">
+  <button class="lm red" id="drawer-toggle" type="button" aria-expanded="false" aria-controls="drawer">Index</button>
+  <p class="hint">Drag the desk to wander. Click a paper to read it.</p>
+  <div class="hud-group">
+    <button class="lm" id="zoom-out" type="button" aria-label="Zoom out">&minus;</button>
+    <button class="lm" id="zoom-in" type="button" aria-label="Zoom in">+</button>
+    <button class="lm" id="recenter" type="button">Recenter</button>
+  </div>
+</div>
+
+<!-- index drawer -->
+<aside id="drawer" aria-label="Index of every paper on the desk" inert>
+  <button class="dr-close" type="button">Close</button>
+  <h2 class="dr-mast">Index</h2>
+  <p class="dr-issue">Every loose paper on the desk. Pick one and the desk slides to it.</p>
+  <ol id="drawer-list"></ol>
+</aside>
+
+<!-- reader -->
+<dialog id="reader" aria-labelledby="rd-title">
+  <div class="rd-bar">
+    <h2 id="rd-title"><span class="rd-ex" id="rd-ex"></span><span id="rd-name"></span></h2>
+    <button class="lm red" id="rd-close" type="button">Put it back</button>
+  </div>
+  <div class="sheet" id="sheet" tabindex="0"></div>
+  <div class="rd-nav">
+    <button class="lm" id="rd-prev" type="button">Previous paper</button>
+    <button class="lm" id="rd-next" type="button">Next paper</button>
+  </div>
+</dialog>
+
+<noscript><p>This desk needs JavaScript to slide around and to open its papers.</p></noscript>
+
+<!-- ==================================================================
+     FULL TEXT OF EACH PAPER
+     One <template id="tpl-{data-id}"> per artifact. Edit the prose here.
+=================================================================== -->
+<template id="tpl-read-me">
+  <article class="paper p-card big">
+    <span class="card-h">Read this first. Or last.</span>
+    <p>This desk was recovered exactly as you see it. Nothing on it is in order, and we have decided not to fix that.</p>
+    <p>Two people wrote these. They sign as S. and T. They worked for opposite offices, each paid to quietly undo whatever the other had done. S. writes in red. T. writes in blue.</p>
+    <ol>
+      <li>Drag anywhere to slide the desk. Scroll works too. Pinch, or use the plus and minus buttons, to zoom.</li>
+      <li>Click any paper, tape or ticket to pick it up and read it.</li>
+      <li>Lost? The Index drawer, bottom left, lists everything.</li>
+    </ol>
+    <p>There is no correct reading order. We suspect that was the point.</p>
+    <p class="signed">The Archivist</p>
+  </article>
+</template>
+
+<template id="tpl-side-a">
+  <article class="paper p-plain big">
+    <!-- To use a real recording instead of the built-in tune, replace this whole
+         .deck block with: <audio controls src="your-file.mp3"></audio> -->
+    <div class="deck" data-tape>
+      <span class="cassette">
+        <span class="cs-label">for T. play when it rains</span>
+        <span class="cs-win"><span class="cs-reel"></span><span class="cs-reel"></span></span>
+        <span class="cs-foot"></span>
+      </span>
+      <div class="deck-controls">
+        <button class="lm" type="button" data-tape-toggle aria-pressed="false">Play side A</button>
+        <span class="deck-status" role="status">Stopped. Eleven notes, about eleven seconds.</span>
+      </div>
+    </div>
+    <h3>Transcript</h3>
+    <p class="aside">[tape hiss]</p>
+    <p>T. I made this in a year with no good songs in it, so I had to write one. It is eleven notes long. I am told your office counts everything. Count them.</p>
+    <p class="aside">[music]</p>
+    <p>That is all of it. Rewind me.</p>
+    <p class="hand-red">S.</p>
+  </article>
+</template>
+
+<template id="tpl-third-stair">
+  <article class="paper p-note torn big">
+    <p>S.,</p>
+    <p>I found your note where you meant me to find it: under the third stair of the lighthouse I had been sent to un-build. Clever. I un-built it anyway.</p>
+    <p>You will notice the coast is now a little more dangerous and a good deal less beautiful. My office calls this a correction. I filed it as one.</p>
+    <p>You asked whether I ever get tired. I do not get tired. I get precise. It is a different complaint, and sleep does nothing for it.</p>
+    <p>Write again. Leave it somewhere I will have to work for.</p>
+    <p>T.</p>
+    <p class="margin-note">Liar. You kept the lamp.<br>I checked.</p>
+  </article>
+</template>
+
+<template id="tpl-diner">
+  <article class="paper p-receipt big">
+    <p class="rc-head">The Last Honest Diner</p>
+    <p class="rc-sub">Table 4, a Tuesday that did not happen</p>
+    <p class="rc-sub">Server: S.</p>
+    <hr class="rc-rule">
+    <p class="rc-row"><span>1 coffee, black, cold by now</span><span>0.00</span></p>
+    <p class="rc-row"><span>1 pie, strawberry (yours)</span><span>0.00</span></p>
+    <p class="rc-row"><span>2 hrs waiting in the booth you would check last</span><span>0.00</span></p>
+    <p class="rc-row"><span>1 lighthouse, restored</span><span>0.00</span></p>
+    <hr class="rc-rule">
+    <p class="rc-row"><span>Subtotal</span><span>one debt</span></p>
+    <p class="rc-row"><span>Tax</span><span>you write back</span></p>
+    <p class="rc-row"><span>Total</span><span>see reverse</span></p>
+    <hr class="rc-rule">
+    <p class="rc-sub">Reverse, in red ink:</p>
+    <p class="rc-back">T. I put the lighthouse back. Not for the ships. I wanted to see what you would do about it. You're welcome. S.</p>
+    <hr class="rc-rule">
+    <p class="rc-sub">Thank you, come again. (You will.)</p>
+  </article>
+</template>
+
+<template id="tpl-napkin">
+  <article class="paper p-napkin big">
+    <p>S.</p>
+    <p>The pie was already eaten when I arrived. Only you would think that is funny.</p>
+    <p>(It is a little funny.)</p>
+    <p>I did nothing about the lighthouse. I want that on record somewhere, and this is the only record I trust.</p>
+    <p>Leaving notes is not regulation. I looked it up. I looked for a very long time.</p>
+    <p>T.</p>
+  </article>
+</template>
+
+<template id="tpl-telegram">
+  <article class="paper p-telegram big">
+    <p class="tg-head"><b>Telegram</b><span>to S., care of wherever<br>from T.</span></p>
+    <p class="strip">They have noticed the lighthouse stop</p>
+    <p class="strip">I told them it was drift stop</p>
+    <p class="strip">They believed me stop</p>
+    <p class="strip">I have never lied to them before stop</p>
+    <p class="strip">It was easy stop</p>
+    <p class="strip">That is the part that frightens me stop</p>
+    <p class="archivist">Archivist's note: received, no date. Office of origin struck out by hand.</p>
+  </article>
+</template>
+
+<template id="tpl-clipping">
+  <article class="paper p-mag big">
+    <p class="cuts">
+      <span class="cut">meet</span><span class="cut">me</span><span class="cut">where</span><span class="cut">nothing</span><span class="cut">has</span><span class="cut">been</span><span class="cut">corrected</span>
+    </p>
+    <p class="mag-cap">Seven words, seven magazines, four decades, one pair of scissors. I took a single word from each so that no archive would miss a whole page.</p>
+    <p class="mag-cap">If you can read this, you have already decided. Bring nothing they issued you.</p>
+    <p class="mag-cap">S.</p>
+  </article>
+</template>
+
+<template id="tpl-polaroid">
+  <article class="paper p-polaroid big">
+    <svg viewBox="0 0 240 200" role="img" aria-label="A striped lighthouse on dark rocks, its lamp lit. Two long shadows fall across the sand in the foreground."><use href="#lighthouse"/></svg>
+    <p class="pol-cap">the lamp, still on</p>
+    <p>Photograph, undated. Two shadows cross the sand. Only one of them was holding the camera.</p>
+    <p>On the back, in blue: <span class="hand-blue">Proof.</span></p>
+    <p>Below that, in red: <span class="hand-red">Of what?</span></p>
+    <p>Below that, in blue again: nothing. But the pen was pressed hard enough to dent the paper.</p>
+  </article>
+</template>
+
+<template id="tpl-late-show">
+  <article class="paper p-plain big">
+    <div class="paper p-ticket">
+      <span class="tk-main">
+        <span class="tk-big">Admit one</span>
+        <span class="tk-small">The Roxy, late show. Row K, seat 11.</span>
+      </span>
+      <span class="tk-stub">No. 0011</span>
+    </div>
+    <p style="margin-top:20px">Found in the pocket of a coat T. had not bought yet.</p>
+    <p>Back of the ticket, in red: <span class="hand-red">Seat 12 is taken. Guess by whom.</span></p>
+    <!-- Paste a video address into data-video and a link to it appears in this film frame. -->
+    <div class="reel" data-video="">
+      <strong>No reel threaded yet</strong>
+      Add a video address to this exhibit's <code>data-video</code> attribute and the link to it appears here.
+    </div>
+  </article>
+</template>
+
+<template id="tpl-everbearing">
+  <article class="paper p-seed big">
+    <span class="sd-band">Strawberries</span>
+    <div class="sd-body">
+      <p class="sd-print">Everbearing. Sow in spring. Full sun. Do not revise.</p>
+      <p>Back of the packet, in red:</p>
+      <p class="hand-red">T. Plant these somewhere neither office has on a schedule. They take a season. That is what I am asking you for. One season, uncorrected.</p>
+      <p class="hand-red">S.</p>
+    </div>
+  </article>
+</template>
+
+<template id="tpl-postcard">
+  <article class="paper p-postcard big">
+    <div class="pc-msg">
+      <span class="pc-title">Greetings from the coast (before)</span>
+      <p>S. Weather holding. Lamp lit.</p>
+      <p>It rained on the Thursday, so I played it. I counted eleven. Then I counted again, in case you had hidden a twelfth.</p>
+      <p>T.</p>
+    </div>
+    <div class="pc-addr">
+      <span class="stamp">11</span><span class="postmark">the coast<br>before</span>
+      <span class="al">S.</span><span class="al">c/o the third stair</span><span class="al">the lighthouse</span><span class="al">(as restored)</span>
+    </div>
+  </article>
+</template>
+
+<template id="tpl-never-sent">
+  <article class="paper p-note crumpled big">
+    <p>S.,</p>
+    <p><s>I cannot.</s></p>
+    <p><s>They will notice.</s></p>
+    <p><s>It is not regulation to</s></p>
+    <p>I planted them.</p>
+    <p>Come and see what a year looks like when nobody edits it.</p>
+    <p>T.</p>
+    <p class="archivist">Archivist's note: found flat, though it had clearly been crumpled first. Somebody smoothed it out.</p>
+    <span class="inkstamp">Never sent</span>
+  </article>
+</template>
+
+<script>
+(() => {
+  'use strict';
+  const BOARD_W = 3000, BOARD_H = 2000, HOME = [1500, 900], EDGE = 80;
+  const MIN_S = 0.35, MAX_S = 1.5;
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const vp = $('#viewport'), board = $('#board');
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  const pad = n => String(n).padStart(2, '0');
+
+  /* ---------- seeded randomness, so the mess is the same mess every visit ---------- */
+  function mulberry32(a) {
+    return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+  const rand = mulberry32(1962);
+  const tilt = () => (-3 + rand() * 7).toFixed(2) + 'deg';          // -3deg to +4deg, per design.md
+  $$('[data-tilt]').forEach(el => el.style.setProperty('--r', tilt()));
+
+  /* ---------- cutout ransom-note lettering: every letter its own typeface ---------- */
+  const FONTS = [
+    { f: "'Abril Fatface',Georgia,serif" },
+    { f: "'Special Elite','Courier New',monospace" },
+    { f: "'Permanent Marker','Comic Sans MS',cursive" },
+    { f: "'Rye','Rockwell',serif" },
+    { f: "'Courier Prime','Courier New',monospace", w: 700 },
+    { f: "'Pacifico','Brush Script MT',cursive", lower: true },
+    { f: "'Alfa Slab One','Rockwell',serif" },
+    { f: "'UnifrakturCook','Old English Text MT',serif", w: 700, lower: true },
+    { f: "'Playfair Display','Times New Roman',serif", w: 900, italic: true },
+    { f: "'Bungee','Arial Black',sans-serif" },
+    { f: "'Rock Salt','Bradley Hand',cursive", lower: true, small: true },
+    { f: "Georgia,'Times New Roman',serif", w: 700 },
+    { f: "Impact,'Arial Narrow',sans-serif" },
+    { f: "'Caveat','Segoe Script',cursive", w: 700 },
+    { f: "'Times New Roman',Times,serif", italic: true },
+    { f: "'Arial Black',Arial,sans-serif", w: 900 }
+  ];
+  const SWATCH = [['#FFFDF5', '#1F1F1F'], ['#1F1F1F', '#FFFDF5'], ['#D94B50', '#FFFDF5'], ['#4A6984', '#FFFDF5'],
+                  ['#F9E8E8', '#1F1F1F'], ['#F4EFE6', '#B5343A'], ['#FFFDF5', '#4A6984']];
+  const SWATCH_ON_INK = SWATCH.filter(s => s[0] !== '#1F1F1F');
+  function styleCut(el, i, swatches = SWATCH) {
+    const font = FONTS[i % FONTS.length], [bg, fg] = swatches[(i * 3 + 1) % swatches.length];
+    el.style.fontFamily = font.f;
+    el.style.fontWeight = font.w || 400;
+    el.style.fontStyle = font.italic ? 'italic' : 'normal';
+    if (font.small) el.style.fontSize = '.62em';
+    el.style.background = bg; el.style.color = fg;
+    el.style.setProperty('--r', tilt());
+    el.style.setProperty('--dy', Math.round(-5 + rand() * 10) + 'px');
+    el.textContent = font.lower ? el.textContent.toLowerCase() : el.textContent.toUpperCase();
+  }
+  $$('[data-ransom]').forEach(h => {
+    const text = h.textContent.trim(); let i = 0;
+    h.setAttribute('aria-label', text); h.textContent = '';
+    text.split(/\s+/).forEach(word => {
+      const row = document.createElement('span'); row.className = 'rrow'; row.setAttribute('aria-hidden', 'true');
+      [...word].forEach(ch => { const t = document.createElement('span'); t.className = 'rl'; t.textContent = ch; styleCut(t, i++); row.append(t); });
+      h.append(row);
+    });
+  });
+  $$('.cut', board).forEach((c, i) => styleCut(c, i + 2, SWATCH_ON_INK));
+
+  /* ---------- camera: pan and zoom ---------- */
+  const defaultScale = () => (innerWidth < 720 ? 0.7 : 1);
+  let s = defaultScale(), tx = 0, ty = 0, anim = 0, inertia = 0;
+
+  function clampXY(x, y) {
+    const vw = vp.clientWidth, vh = vp.clientHeight, w = BOARD_W * s, h = BOARD_H * s;
+    return [
+      w + 2 * EDGE <= vw ? (vw - w) / 2 : Math.min(EDGE, Math.max(vw - w - EDGE, x)),
+      h + 2 * EDGE <= vh ? (vh - h) / 2 : Math.min(EDGE, Math.max(vh - h - EDGE, y))
+    ];
+  }
+  function apply() {
+    [tx, ty] = clampXY(tx, ty);
+    board.style.transform = `translate(${Math.round(tx)}px,${Math.round(ty)}px) scale(${s})`;
+  }
+  function stopMotion() { cancelAnimationFrame(anim); cancelAnimationFrame(inertia); }
+  function panTo(nx, ny, animate = true) {
+    stopMotion();
+    [nx, ny] = clampXY(nx, ny);
+    if (!animate || reduce.matches) { tx = nx; ty = ny; apply(); return; }
+    const sx = tx, sy = ty, t0 = performance.now(), dur = 420;
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+      tx = sx + (nx - sx) * e; ty = sy + (ny - sy) * e; apply();
+      if (k < 1) anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  }
+  const centerOn = (bx, by, animate = true) => panTo(vp.clientWidth / 2 - bx * s, vp.clientHeight / 2 - by * s, animate);
+  function zoomAt(cx, cy, ns) {
+    ns = Math.min(MAX_S, Math.max(MIN_S, ns));
+    const bx = (cx - tx) / s, by = (cy - ty) / s;
+    s = ns; tx = cx - bx * s; ty = cy - by * s;
+  }
+  const zoomBy = f => { stopMotion(); zoomAt(vp.clientWidth / 2, vp.clientHeight / 2, s * f); apply(); };
+
+  /* drag with one pointer, pinch with two; a press that never moves stays a click */
+  const pts = new Map();
+  let dragging = false, startX = 0, startY = 0, lastX = 0, lastY = 0, lastT = 0, vx = 0, vy = 0;
+  let pinchD = 0, pinchX = 0, pinchY = 0, suppressClickUntil = 0;
+
+  vp.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    stopMotion(); setDrawer(false);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 1) {
+      dragging = false; startX = lastX = e.clientX; startY = lastY = e.clientY; lastT = e.timeStamp; vx = vy = 0;
+    } else if (pts.size === 2) {
+      dragging = true; pinchD = 0; document.body.classList.add('is-dragging');
+    }
+  });
+  vp.addEventListener('pointermove', e => {
+    const p = pts.get(e.pointerId); if (!p) return;
+    p.x = e.clientX; p.y = e.clientY;
+    if (pts.size >= 2) {
+      const [a, b] = [...pts.values()];
+      const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      if (pinchD) { zoomAt(mx, my, s * d / pinchD); tx += mx - pinchX; ty += my - pinchY; apply(); }
+      pinchD = d; pinchX = mx; pinchY = my;
+      return;
+    }
+    if (!dragging) {
+      if (Math.hypot(e.clientX - startX, e.clientY - startY) < 6) return;
+      dragging = true; document.body.classList.add('is-dragging');
+      if (e.pointerType !== 'touch') { try { vp.setPointerCapture(e.pointerId); } catch (_) {} }
+    }
+    const dx = e.clientX - lastX, dy = e.clientY - lastY, dt = Math.max(1, e.timeStamp - lastT);
+    tx += dx; ty += dy;
+    vx = 0.75 * (dx / dt) + 0.25 * vx; vy = 0.75 * (dy / dt) + 0.25 * vy;
+    lastX = e.clientX; lastY = e.clientY; lastT = e.timeStamp;
+    apply();
+  });
+  function endPointer(e) {
+    if (!pts.delete(e.pointerId)) return;
+    if (pts.size === 1) {                               // pinch ended, carry on as a one-finger drag
+      const [p] = [...pts.values()];
+      lastX = p.x; lastY = p.y; lastT = e.timeStamp; vx = vy = 0; pinchD = 0;
+      return;
+    }
+    if (pts.size === 0 && dragging) {
+      dragging = false; document.body.classList.remove('is-dragging');
+      suppressClickUntil = performance.now() + 250;
+      if (e.timeStamp - lastT > 80) vx = vy = 0;
+      if (!reduce.matches && Math.hypot(vx, vy) > 0.05) {
+        const glide = () => {
+          vx *= 0.93; vy *= 0.93;
+          if (Math.hypot(vx, vy) < 0.02) return;
+          tx += vx * 16; ty += vy * 16; apply();
+          inertia = requestAnimationFrame(glide);
+        };
+        inertia = requestAnimationFrame(glide);
+      }
+    }
+  }
+  vp.addEventListener('pointerup', endPointer);
+  vp.addEventListener('pointercancel', endPointer);
+  vp.addEventListener('click', e => {                   // a drag that ends on a paper must not open it
+    if (performance.now() < suppressClickUntil) { e.stopPropagation(); e.preventDefault(); }
+  }, true);
+
+  /* wheel and trackpad move the desk directly; ctrl/cmd + wheel (or trackpad pinch) zooms */
+  vp.addEventListener('wheel', e => {
+    e.preventDefault(); stopMotion();
+    if (e.ctrlKey || e.metaKey) {
+      zoomAt(e.clientX, e.clientY, s * Math.exp(-e.deltaY * 0.01));
+    } else {
+      let dx = e.deltaX, dy = e.deltaY;
+      if (e.deltaMode === 1) { dx *= 32; dy *= 32; }
+      if (e.shiftKey && !dx) { dx = dy; dy = 0; }
+      tx -= dx; ty -= dy;
+    }
+    apply();
+  }, { passive: false });
+
+  /* the browser must never scroll the desk on its own (it would fight the transform) */
+  vp.addEventListener('scroll', () => { vp.scrollLeft = 0; vp.scrollTop = 0; });
+  addEventListener('resize', apply);
+
+  /* ---------- exhibits ---------- */
+  const arts = $$('.artifact', board);
+  const list = $('#drawer-list'), drawer = $('#drawer'), drawerToggle = $('#drawer-toggle');
+  const dlg = $('#reader'), sheet = $('#sheet');
+  let current = -1;
+
+  const centreOf = a => [a.offsetLeft + a.offsetWidth / 2, a.offsetTop + a.offsetHeight / 2];
+  function reveal(a, force) {
+    const r = a.getBoundingClientRect(), m = 40;
+    const inside = r.left >= m && r.top >= m && r.right <= vp.clientWidth - m && r.bottom <= vp.clientHeight - 90;
+    if (force || !inside) centerOn(...centreOf(a));
+  }
+  function locate(i) {
+    const a = arts[i];
+    setDrawer(false); reveal(a, true);
+    a.focus({ preventScroll: true });
+    a.classList.add('located'); setTimeout(() => a.classList.remove('located'), 1800);
+  }
+
+  arts.forEach((a, i) => {
+    const n = pad(i + 1);
+    $$('[data-n]', a).forEach(el => el.textContent = n);
+    a.setAttribute('aria-label', `Exhibit ${n}, ${a.dataset.kind}: ${a.dataset.title}. Open to read.`);
+    a.addEventListener('click', () => openReader(i));
+    const li = document.createElement('li'), b = document.createElement('button');
+    b.type = 'button';
+    b.innerHTML = '<span class="dn"></span><span class="dt"></span><span class="dk"></span>';
+    b.children[0].textContent = n; b.children[1].textContent = a.dataset.title; b.children[2].textContent = a.dataset.kind;
+    b.addEventListener('click', () => locate(i));
+    li.append(b); list.append(li);
+  });
+  drawerToggle.textContent = `Index (${arts.length})`;
+
+  /* keyboard users tab through papers; slide the desk so the focused one is on screen */
+  board.addEventListener('focusin', e => {
+    const a = e.target.closest('.artifact');
+    if (a && a.matches(':focus-visible')) reveal(a);
+  });
+
+  /* ---------- index drawer ---------- */
+  function setDrawer(open) {
+    if (drawer.classList.contains('open') === open) return;
+    drawer.classList.toggle('open', open);
+    drawer.toggleAttribute('inert', !open);
+    drawerToggle.setAttribute('aria-expanded', String(open));
+    if (open) $('.dr-close', drawer).focus();
+  }
+  drawerToggle.addEventListener('click', () => setDrawer(!drawer.classList.contains('open')));
+  $('.dr-close', drawer).addEventListener('click', () => { setDrawer(false); drawerToggle.focus(); });
+
+  /* ---------- reader ---------- */
+  function openReader(i) {
+    stopTape();
+    current = i;
+    const a = arts[i], tpl = document.getElementById('tpl-' + a.dataset.id);
+    const wrap = document.createElement('div'); wrap.className = 'paper-shadow';
+    if (tpl) wrap.append(tpl.content.cloneNode(true));
+    sheet.replaceChildren(wrap); sheet.scrollTop = 0;
+    $$('.cut', wrap).forEach((c, k) => styleCut(c, k + 2, SWATCH_ON_INK));
+    $('#rd-ex').textContent = `Exhibit ${pad(i + 1)} of ${pad(arts.length)}, ${a.dataset.kind}`;
+    $('#rd-name').textContent = a.dataset.title;
+    wireTape(wrap); wireReel(wrap);
+    a.classList.add('is-read');
+    if (!dlg.open) dlg.showModal();
+    try { history.replaceState(null, '', '#' + a.dataset.id); } catch (_) {}
+  }
+  const step = d => openReader((current + d + arts.length) % arts.length);
+  $('#rd-prev').addEventListener('click', () => step(-1));
+  $('#rd-next').addEventListener('click', () => step(1));
+  $('#rd-close').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });     // click the linen to put it back
+  dlg.addEventListener('close', () => {
+    stopTape();
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (_) {}
+    const a = arts[current];
+    if (a) { reveal(a); a.focus({ preventScroll: true }); }
+  });
+
+  /* video link slot: shown only when the exhibit carries a real address */
+  function wireReel(root) {
+    $$('.reel', root).forEach(r => {
+      const url = (r.dataset.video || '').trim();
+      if (!/^https?:\/\//i.test(url)) return;
+      const link = document.createElement('a');
+      link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      link.textContent = 'Run the reel (opens in a new tab)';
+      r.replaceChildren(link);
+    });
+  }
+
+  /* ---------- the tape: eleven notes, synthesised, with hiss and a little wow ---------- */
+  let tape = null;
+  const NOTES = [[659.25, .55], [783.99, .55], [880, .9], [783.99, .55], [659.25, .55], [587.33, .9],
+                 [523.25, .55], [587.33, .55], [659.25, .9], [783.99, .7], [440, 1.8]];
+  function stopTape() {
+    if (!tape) return;
+    clearTimeout(tape.timer);
+    try { tape.ctx.close(); } catch (_) {}
+    tape.deck.classList.remove('is-playing');
+    tape.btn.textContent = 'Play side A'; tape.btn.setAttribute('aria-pressed', 'false');
+    tape.status.textContent = 'Stopped. Rewound to the start.';
+    tape = null;
+  }
+  function playTape(deck, btn, status) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { status.textContent = 'This browser has no tape head (no Web Audio). The transcript is below.'; return; }
+    const ctx = new AC(), out = ctx.createGain();
+    out.gain.value = 0.5; out.connect(ctx.destination);
+    const len = ctx.sampleRate * 2, buf = ctx.createBuffer(1, len, ctx.sampleRate), data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    const hiss = ctx.createBufferSource(), hp = ctx.createBiquadFilter(), hg = ctx.createGain();
+    hiss.buffer = buf; hiss.loop = true; hp.type = 'highpass'; hp.frequency.value = 3000; hg.gain.value = 0.03;
+    hiss.connect(hp); hp.connect(hg); hg.connect(out); hiss.start();
+    const wow = ctx.createOscillator(), wowDepth = ctx.createGain();
+    wow.frequency.value = 0.7; wowDepth.gain.value = 7; wow.connect(wowDepth); wow.start();
+    let t = ctx.currentTime + 0.9;
+    NOTES.forEach(([freq, dur]) => {
+      [[1, 'triangle', 0.3], [2, 'sine', 0.08]].forEach(([mult, type, peak]) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = type; o.frequency.value = freq * mult; wowDepth.connect(o.detune);
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(peak, t + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0008, t + dur + 0.9);
+        o.connect(g); g.connect(out); o.start(t); o.stop(t + dur + 1);
+      });
+      t += dur;
+    });
+    const total = t - ctx.currentTime + 1.4;
+    deck.classList.add('is-playing');
+    btn.textContent = 'Stop the tape'; btn.setAttribute('aria-pressed', 'true');
+    status.textContent = 'Playing. Count the notes.';
+    tape = { ctx, deck, btn, status, timer: setTimeout(stopTape, total * 1000) };
+  }
+  function wireTape(root) {
+    const deck = $('[data-tape]', root); if (!deck) return;
+    const btn = $('[data-tape-toggle]', deck), status = $('.deck-status', deck);
+    btn.addEventListener('click', () => { if (tape) stopTape(); else playTape(deck, btn, status); });
+  }
+
+  /* ---------- controls and keys ---------- */
+  $('#zoom-in').addEventListener('click', () => zoomBy(1.2));
+  $('#zoom-out').addEventListener('click', () => zoomBy(1 / 1.2));
+  $('#recenter').addEventListener('click', () => { stopMotion(); s = defaultScale(); centerOn(...HOME); });
+
+  document.addEventListener('keydown', e => {
+    if (dlg.open) {
+      if (e.target.closest('button')) return;
+      if (e.key === 'ArrowLeft') step(-1); else if (e.key === 'ArrowRight') step(1);
+      return;
+    }
+    if (e.key === 'Escape') { if (drawer.classList.contains('open')) { setDrawer(false); drawerToggle.focus(); } return; }
+    if (e.target.closest('#drawer') || e.altKey || e.ctrlKey || e.metaKey) return;
+    const d = e.shiftKey ? 360 : 120;
+    const moves = { ArrowLeft: [d, 0], ArrowRight: [-d, 0], ArrowUp: [0, d], ArrowDown: [0, -d] };
+    if (moves[e.key]) { e.preventDefault(); panTo(tx + moves[e.key][0], ty + moves[e.key][1]); }
+    else if (e.key === '+' || e.key === '=') zoomBy(1.2);
+    else if (e.key === '-' || e.key === '_') zoomBy(1 / 1.2);
+    else if (e.key === '0') { s = defaultScale(); centerOn(...HOME); }
+  });
+
+  /* ---------- start: centred on the masthead, or on a linked exhibit ---------- */
+  centerOn(...HOME, false);
+  const linked = arts.findIndex(a => a.dataset.id === decodeURIComponent(location.hash.slice(1)));
+  if (linked >= 0) { centerOn(...centreOf(arts[linked]), false); openReader(linked); }
+})();
+</script>
+</body>
+</html>
